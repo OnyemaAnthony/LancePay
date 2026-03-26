@@ -22,7 +22,9 @@ model User {
   twoFactorEnabled Boolean  @default(false)
   twoFactorSecret  String?
   taxPercentage    Float    @default(0)
+  timezone         String?
 
+  notifications          Notification[]
   virtualAccount         VirtualAccount?
   wallet                 Wallet?
   bankAccounts           BankAccount[]
@@ -798,4 +800,19 @@ model PaymentMethod {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String   // e.g. "invoice_paid", "withdrawal_complete", "system"
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([createdAt])
 }
