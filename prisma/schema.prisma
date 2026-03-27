@@ -14,6 +14,7 @@ model User {
   role             String   @default("freelancer")
   name             String?
   phone            String?
+  avatarUrl        String?  @db.VarChar(512)
   referralCode     String?  @unique
   referredById     String?
   createdAt        DateTime @default(now())
@@ -23,7 +24,6 @@ model User {
   twoFactorSecret  String?
   taxPercentage    Float    @default(0)
   timezone         String?
-
   virtualAccount         VirtualAccount?
   wallet                 Wallet?
   bankAccounts           BankAccount[]
@@ -55,10 +55,10 @@ model User {
   proposalSignatures     ProposalSignature[]
   withdrawalTransactions WithdrawalTransaction[]
   anchorSessions         AnchorSession[]
-  expenses               Expense[]
-  subscriptions          Subscription[]
-  notifications          Notification[]
-  tags                   Tag[]
+  expenses              Expense[]
+  subscriptions         Subscription[]
+  notifications         Notification[]
+  tags                  Tag[]
 }
 
 model Wallet {
