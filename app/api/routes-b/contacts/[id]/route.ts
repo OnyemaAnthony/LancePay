@@ -3,56 +3,76 @@ import { prisma } from '@/lib/db'
 import { verifyAuthToken } from '@/lib/auth'
 import { logger } from '@/lib/logger'
 
-/**
- * DELETE /api/routes-b/contacts/[id]
- * Permanently removes a contact from the user's list.
- */
-export async function DELETE(
+export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
+  let contactId: string | undefined
+
   try {
-    const authToken = request.headers.get('authorization')?.replace('Bearer ', '')
+    // check auth header
+    const authToken = request.headers
+      .get('authorization')
+      ?.replace('Bearer ', '')
+
     if (!authToken) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    //  verify token
     const claims = await verifyAuthToken(authToken)
     if (!claims) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const user = await prisma.user.findUnique({ where: { privyId: claims.userId } })
+    // get user
+    const user = await prisma.user.findUnique({
+      where: { privyId: claims.userId },
+    })
+
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    const { id } = await params
+    // get contact ID
+    const { id } = params
+    contactId = id
 
-    // Find contact by id
+    // find contact
     const contact = await prisma.contact.findUnique({
       where: { id },
     })
 
+    // not found - 404
     if (!contact) {
-      return NextResponse.json({ error: 'Contact not found' }, { status: 404 })
+      return NextResponse.json(
+        { error: 'Contact not found' },
+        { status: 404 }
+      )
     }
 
-    // Authorization check: verify ownership
+    // ownership check - 403
     if (contact.userId !== user.id) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      return NextResponse.json(
+        { error: 'Forbidden' },
+        { status: 403 }
+      )
     }
 
-    // Delete the contact
-    await prisma.contact.delete({
-      where: { id },
-    })
-
-    // Return 204 No Content
-    return new NextResponse(null, { status: 204 })
+    // return contact - 200
+    return NextResponse.json(
+      { contact },
+      { status: 200 }
+    )
   } catch (error) {
-    const { id } = await params
-    logger.error({ err: error, contactId: id }, 'Routes B contact DELETE error')
-    return NextResponse.json({ error: 'Failed to delete contact' }, { status: 500 })
+    logger.error(
+      { err: error, contactId },
+      'Routes B contact GET error'
+    )
+
+    return NextResponse.json(
+      { error: 'Failed to fetch contact' },
+      { status: 500 }
+    )
   }
 }
