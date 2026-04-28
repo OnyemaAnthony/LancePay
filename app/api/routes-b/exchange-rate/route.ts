@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getCachedValue, setCachedValue } from '../_lib/cache'
 
 const EXCHANGE_RATE_TTL_MS = 60_000
+const MAX_STALE_SECONDS = 3600
+
+type CachedRate = {
+  value: number
+  fetchedAt: string
+}
 
 function canBypassCache(request: NextRequest) {
   const bypassParam = new URL(request.url).searchParams.get('bypassCache')
@@ -19,14 +25,14 @@ function canBypassCache(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  try {
-    const searchParams = new URL(request.url).searchParams
-    const from = (searchParams.get('from') || 'USD').toUpperCase()
-    const to = (searchParams.get('to') || 'NGN').toUpperCase()
-    const cacheKey = `exchange-rate:${from}:${to}`
+  const searchParams = new URL(request.url).searchParams
+  const from = (searchParams.get('from') || 'USD').toUpperCase()
+  const to = (searchParams.get('to') || 'NGN').toUpperCase()
+  const cacheKey = `exchange-rate:${from}:${to}`
 
+  try {
     if (!canBypassCache(request)) {
-      const cached = getCachedValue<{ value: number; fetchedAt: string }>(cacheKey)
+      const cached = getCachedValue<CachedRate>(cacheKey)
       if (cached) {
         return NextResponse.json(
           {
@@ -86,9 +92,30 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Exchange rate fetch error:', error)
 
+    const stale = getCachedValue<CachedRate>(cacheKey)
+    if (stale) {
+      const stalenessSeconds = Math.floor((Date.now() - new Date(stale.fetchedAt).getTime()) / 1000)
+      if (stalenessSeconds <= MAX_STALE_SECONDS) {
+        return NextResponse.json(
+          {
+            rate: {
+              from,
+              to,
+              value: stale.value,
+              source: 'open.er-api.com',
+              fetchedAt: stale.fetchedAt,
+            },
+            stalenessSeconds,
+          },
+          { status: 200, headers: { 'X-Stale': 'true' } },
+        )
+      }
+    }
+
     return NextResponse.json(
       {
         error: 'Unable to fetch exchange rate. Please try again.',
+        code: 'RATE_UNAVAILABLE',
       },
       { status: 503 },
     )

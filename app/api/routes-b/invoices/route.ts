@@ -3,6 +3,61 @@ import { prisma } from '@/lib/db'
 import { verifyAuthToken } from '@/lib/auth'
 import { generateInvoiceNumber } from '@/lib/utils'
 import { decodeCursor, encodeCursor } from '../_lib/cursor'
+import { findRecentDuplicateInvoice } from '../_lib/duplicate-detection'
+import { registerRoute } from '../_lib/openapi'
+import { z } from 'zod'
+
+// Register OpenAPI documentation
+registerRoute({
+  method: 'GET',
+  path: '/invoices',
+  summary: 'List invoices',
+  description: 'Get cursor-paginated invoices for the authenticated user, optionally filtered by status.',
+  requestSchema: z.object({
+    status: z.enum(['pending', 'paid', 'overdue', 'cancelled']).optional(),
+    cursor: z.string().optional(),
+    limit: z.string().optional().default('25')
+  }),
+  responseSchema: z.object({
+    data: z.array(z.object({
+      id: z.string(),
+      invoiceNumber: z.string(),
+      clientName: z.string().nullable(),
+      clientEmail: z.string(),
+      amount: z.number(),
+      currency: z.string(),
+      status: z.string(),
+      dueDate: z.string().nullable(),
+      createdAt: z.string()
+    })),
+    nextCursor: z.string().nullable()
+  }),
+  tags: ['invoices']
+})
+
+registerRoute({
+  method: 'POST',
+  path: '/invoices',
+  summary: 'Create invoice',
+  description: 'Create a new invoice. Returns 409 if a similar invoice was created recently.',
+  requestSchema: z.object({
+    clientEmail: z.string().email(),
+    clientName: z.string().optional(),
+    description: z.string().min(1),
+    amount: z.number().positive(),
+    currency: z.string().default('USD'),
+    dueDate: z.string().optional()
+  }),
+  responseSchema: z.object({
+    id: z.string(),
+    invoiceNumber: z.string(),
+    paymentLink: z.string(),
+    status: z.string(),
+    amount: z.number(),
+    currency: z.string()
+  }),
+  tags: ['invoices']
+})
 
 async function getAuthenticatedUser(request: NextRequest) {
   const authToken = request.headers.get('authorization')?.replace('Bearer ', '')
@@ -132,6 +187,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'amount must be greater than 0' }, { status: 400 })
   }
 
+  const { searchParams } = new URL(request.url)
+  const forceCreate = searchParams.get('force') === 'true'
+  const normalizedClientEmail = String(clientEmail).toLowerCase()
+  const normalizedCurrency = String(currency).toUpperCase()
+
+  if (!forceCreate) {
+    const duplicateInvoiceId = await findRecentDuplicateInvoice({
+      userId: auth.user.id,
+      clientEmail: normalizedClientEmail,
+      amount: parsedAmount,
+      currency: normalizedCurrency,
+    })
+
+    if (duplicateInvoiceId) {
+      return NextResponse.json({ duplicateOfId: duplicateInvoiceId }, { status: 409 })
+    }
+  }
+
   let parsedDueDate: Date | null = null
   if (dueDate) {
     parsedDueDate = new Date(dueDate)
@@ -148,11 +221,11 @@ export async function POST(request: NextRequest) {
     data: {
       userId: auth.user.id,
       invoiceNumber,
-      clientEmail: String(clientEmail).toLowerCase(),
+      clientEmail: normalizedClientEmail,
       clientName: clientName || null,
       description,
       amount: parsedAmount,
-      currency,
+      currency: normalizedCurrency,
       paymentLink,
       dueDate: parsedDueDate,
     },

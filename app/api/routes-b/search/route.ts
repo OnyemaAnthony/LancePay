@@ -2,6 +2,41 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuthToken } from '@/lib/auth'
 import { prisma } from '@/lib/db'
 import { logger } from '@/lib/logger'
+import { validateSearchQuery } from '../_lib/validation'
+import { registerRoute } from '../_lib/openapi'
+import { z } from 'zod'
+
+// Register OpenAPI documentation
+registerRoute({
+  method: 'GET',
+  path: '/search',
+  summary: 'Search invoices and bank accounts',
+  description: 'Search across invoices and bank accounts for the authenticated user.',
+  requestSchema: z.object({
+    q: z.string().min(1).describe('Search query'),
+    type: z.enum(['invoices', 'bank-accounts']).optional().describe('Filter by type')
+  }),
+  responseSchema: z.object({
+    query: z.string(),
+    results: z.object({
+      invoices: z.array(z.object({
+        id: z.string(),
+        invoiceNumber: z.string(),
+        clientName: z.string().nullable(),
+        amount: z.number(),
+        status: z.string()
+      })),
+      bankAccounts: z.array(z.object({
+        id: z.string(),
+        bankName: z.string(),
+        accountName: z.string(),
+        accountNumber: z.string(),
+        isDefault: z.boolean()
+      }))
+    })
+  }),
+  tags: ['search']
+})
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,16 +50,14 @@ export async function GET(request: NextRequest) {
     if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
     const url = new URL(request.url)
-    const q = url.searchParams.get('q')?.trim() ?? ''
+    const query = validateSearchQuery(url.searchParams.get('q'))
     const type = url.searchParams.get('type')
 
-    if (q.length < 2) {
-      return NextResponse.json(
-        { error: 'Query parameter "q" is required and must be at least 2 characters' },
-        { status: 400 }
-      )
+    if (!query.ok) {
+      return NextResponse.json({ error: query.error }, { status: 400 })
     }
 
+    const q = query.value
     const isInvoicesOnly = type === 'invoices'
     const isBankAccountsOnly = type === 'bank-accounts'
     const isBoth = !type
