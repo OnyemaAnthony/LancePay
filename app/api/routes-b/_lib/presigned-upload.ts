@@ -1,5 +1,5 @@
 import { createHash } from 'crypto'
-import { validateFileSignature, isAllowedMimeType, getMaxFileSize } from './file-signature'
+import { sniffMimeType, isAllowedMimeType, getMaxFileSize, stripExifMetadata } from './file-signature'
 
 export interface PresignedUploadResponse {
   url: string
@@ -35,7 +35,7 @@ export function generatePresignedUpload(userId: string): PresignedUploadResponse
     folder,
     resource_type: 'auto',
     max_file_size: getMaxFileSize(),
-    allowed_formats: 'jpg,jpeg,png,gif,webp'
+    allowed_formats: 'jpg,jpeg,png,webp'
   }
   
   // Create signature string
@@ -60,7 +60,7 @@ export function generatePresignedUpload(userId: string): PresignedUploadResponse
       signature,
       resource_type: 'auto',
       max_file_size: getMaxFileSize().toString(),
-      allowed_formats: 'jpg,jpeg,png,gif,webp'
+      allowed_formats: 'jpg,jpeg,png,webp'
     },
     key: publicId,
     expiresAt: expiresAt.toISOString()
@@ -72,32 +72,35 @@ export async function validateUploadedFile(key: string, buffer: ArrayBuffer): Pr
   if (buffer.byteLength > getMaxFileSize()) {
     return {
       valid: false,
-      error: 'File size exceeds 5MB limit',
+      error: 'File size exceeds 2MiB limit',
       size: buffer.byteLength
     }
   }
   
   // Validate file signature
-  const signatureValidation = validateFileSignature(buffer)
-  if (!signatureValidation.valid) {
+  const mimeType = sniffMimeType(buffer)
+  if (!mimeType) {
     return {
       valid: false,
-      error: 'Invalid file type. Only JPEG, PNG, GIF, and WebP are allowed'
+      error: 'Invalid file type. Only JPEG, PNG, and WebP are allowed'
     }
   }
   
   // Check if MIME type is allowed
-  if (!isAllowedMimeType(signatureValidation.mimeType!)) {
+  if (!isAllowedMimeType(mimeType)) {
     return {
       valid: false,
       error: 'MIME type not allowed'
     }
   }
   
+
+  const sanitized = stripExifMetadata(buffer, mimeType)
+
   return {
     valid: true,
-    mimeType: signatureValidation.mimeType,
-    size: buffer.byteLength
+    mimeType,
+    size: sanitized.byteLength
   }
 }
 
